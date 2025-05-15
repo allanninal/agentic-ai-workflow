@@ -6,6 +6,8 @@ This script demonstrates a basic agentic workflow where an AI agent:
 2. Breaks it down into steps
 3. Executes each step sequentially
 4. Compiles a final response
+
+TODO: Add support for memory/context persistence between sessions
 """
 
 import os
@@ -13,6 +15,7 @@ import json
 from dotenv import load_dotenv
 from openai import OpenAI
 import time
+# import logging  # Will add this later for better debugging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -29,7 +32,8 @@ class Agent:
         """
         self.model = model
         self.client = self._setup_client()
-        self.conversation_history = []
+        self.conversation_history = []  # FIXME: Not actually using this yet
+        # self.max_retries = 3  # Might need this for production
         
     def _setup_client(self):
         """Set up the OpenRouter client"""
@@ -63,6 +67,13 @@ class Agent:
             str: The model's response content
         """
         try:
+            # Old implementation with temperature=0.7
+            # response = self.client.chat.completions.create(
+            #     model=self.model,
+            #     messages=messages,
+            #     temperature=0.7
+            # )
+            
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages
@@ -70,6 +81,7 @@ class Agent:
             return response.choices[0].message.content
         except Exception as e:
             print(f"Error calling LLM: {e}")
+            # Maybe we should retry here?
             return None
     
     def analyze_task(self, user_query):
@@ -126,9 +138,10 @@ class Agent:
         Your response should be detailed and directly address the step's requirements.
         """
         
+        step_msg = f"Context so far: {context}\n\nExecute this step: {step['description']}\n\nReasoning: {step['reasoning']}"
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Context so far: {context}\n\nExecute this step: {step['description']}\n\nReasoning: {step['reasoning']}"}
+            {"role": "user", "content": step_msg}
         ]
         
         return self._call_llm(messages)
@@ -150,7 +163,12 @@ class Agent:
         and directly address the user's original query.
         """
         
-        steps_text = "\n\n".join([f"Step {i+1} result: {result}" for i, result in enumerate(steps_results)])
+        # Join step results - could probably be a one-liner but this is clearer
+        step_texts = []
+        for i, res in enumerate(steps_results):
+            step_num = i + 1
+            step_texts.append(f"Step {step_num} result: {res}")
+        steps_text = "\n\n".join(step_texts)
         
         messages = [
             {"role": "system", "content": system_prompt},
@@ -180,25 +198,25 @@ class Agent:
         for i, step in enumerate(steps):
             print(f"  {i+1}. {step['description']}")
         
-        steps_results = []
+        step_results = []  # Going with snake_case here, inconsistent with camelCase elsewhere
         context = ""
         
         for i, step in enumerate(steps):
             print(f"\n⚙️ Executing step {i+1}: {step['description']}")
             result = self.execute_step(step, context)
-            steps_results.append(result)
+            step_results.append(result)
             context += f"\nStep {i+1} result: {result}"
             print(f"  ✅ Completed")
             # Add a small delay to avoid rate limits
-            time.sleep(1)
+            time.sleep(1)  # Maybe this should be configurable?
         
         print("\n🔄 Compiling final response...")
-        final_response = self.compile_results(steps_results, user_query)
+        final_response = self.compile_results(step_results, user_query)
         
         return {
             "query": user_query,
             "steps": steps,
-            "step_results": steps_results,
+            "step_results": step_results,  # Note: variable name changed from steps_results
             "final_response": final_response
         }
 
@@ -207,7 +225,7 @@ def main():
     # Initialize the agent with a capable model
     agent = Agent(model="openai/gpt-4")
     
-    # Example query
+    # Example query - we used to have a different one about travel planning
     user_query = "Research and suggest three possible vacation destinations for a family with young children, considering budget-friendly options."
     
     # Solve the task
@@ -219,5 +237,6 @@ def main():
     print("=" * 50)
     print(result["final_response"])
 
+# Entry point
 if __name__ == "__main__":
     main() 
